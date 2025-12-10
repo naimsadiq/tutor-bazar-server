@@ -51,35 +51,13 @@ async function run() {
     app.get("/student-post", async (req, res) => {
       try {
         const email = req.query.email;
-        console.log(email);
+        let query = {};
 
-        // IMPORTANT: যদি email না থাকে → রিকোয়েস্ট ব্লক করুন
-        if (!email) {
-          return res.status(400).send({
-            error: true,
-            message: "Email query parameter is required",
-          });
+        if (email) {
+          query.studentEmail = email;
         }
 
-        console.log("User Email:", email);
-
-        const result = await studentPostCollection
-          .find({ studentEmail: email })
-          .toArray();
-
-        res.send(result);
-      } catch (error) {
-        console.error("GET /student-post Error:", error);
-        res.status(500).send({
-          error: true,
-          message: "Failed to fetch the tutor request",
-        });
-      }
-    });
-
-    app.get("/student-post", async (req, res) => {
-      try {
-        const result = await studentPostCollection.find().toArray();
+        const result = await studentPostCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
         console.error("GET /student-post Error:", error);
@@ -106,7 +84,6 @@ async function run() {
         });
       }
     });
-    
 
     // Get last 6 tutor requests
     app.get("/student-post-latest", async (req, res) => {
