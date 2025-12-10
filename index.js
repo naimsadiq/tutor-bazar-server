@@ -77,6 +77,33 @@ async function run() {
         });
       }
     });
+    app.get("/tutor-request", async (req, res) => {
+      try {
+        const email = req.query.email;
+
+        // IMPORTANT: যদি email না থাকে → রিকোয়েস্ট ব্লক করুন
+        if (!email) {
+          return res.status(400).send({
+            error: true,
+            message: "Email query parameter is required",
+          });
+        }
+
+        console.log("User Email:", email);
+
+        const result = await tutorRequestCollection
+          .find({ studentEmail: email })
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.error("GET /tutor-request Error:", error);
+        res.status(500).send({
+          error: true,
+          message: "Failed to fetch the tutor request",
+        });
+      }
+    });
 
     // Get last 6 tutor requests
     app.get("/tutor-request-latest", async (req, res) => {
