@@ -31,7 +31,7 @@ async function run() {
     await client.connect();
     const db = client.db("tutor_bazar_db");
     const userCollection = db.collection("users");
-    const tutorRequestCollection = db.collection("tutor-request");
+    const studentPostCollection = db.collection("student-post");
     const teacherProfilesCollection = db.collection("teacher_profiles");
 
     app.post("/users", async (req, res) => {
@@ -48,38 +48,10 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/tutor-request", async (req, res) => {
-      try {
-        const result = await tutorRequestCollection.find().toArray();
-        res.send(result);
-      } catch (error) {
-        console.error("GET /tutor-request Error:", error);
-        res.status(500).send({
-          error: true,
-          message: "Failed to fetch tutor requests",
-        });
-      }
-    });
-
-    app.get("/tutor-request/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const result = await tutorRequestCollection.findOne({
-          _id: new ObjectId(id),
-        });
-
-        res.send(result);
-      } catch (error) {
-        console.error("GET /tutor-request/:id Error:", error);
-        res.status(500).send({
-          error: true,
-          message: "Failed to fetch the tutor request",
-        });
-      }
-    });
-    app.get("/tutor-request", async (req, res) => {
+    app.get("/student-post", async (req, res) => {
       try {
         const email = req.query.email;
+        console.log(email);
 
         // IMPORTANT: যদি email না থাকে → রিকোয়েস্ট ব্লক করুন
         if (!email) {
@@ -91,13 +63,13 @@ async function run() {
 
         console.log("User Email:", email);
 
-        const result = await tutorRequestCollection
+        const result = await studentPostCollection
           .find({ studentEmail: email })
           .toArray();
 
         res.send(result);
       } catch (error) {
-        console.error("GET /tutor-request Error:", error);
+        console.error("GET /student-post Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to fetch the tutor request",
@@ -105,10 +77,41 @@ async function run() {
       }
     });
 
-    // Get last 6 tutor requests
-    app.get("/tutor-request-latest", async (req, res) => {
+    app.get("/student-post", async (req, res) => {
       try {
-        const latestRequests = await tutorRequestCollection
+        const result = await studentPostCollection.find().toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("GET /student-post Error:", error);
+        res.status(500).send({
+          error: true,
+          message: "Failed to fetch tutor requests",
+        });
+      }
+    });
+
+    app.get("/student-post/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await studentPostCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        res.send(result);
+      } catch (error) {
+        console.error("GET /student-post/:id Error:", error);
+        res.status(500).send({
+          error: true,
+          message: "Failed to fetch the tutor request",
+        });
+      }
+    });
+    
+
+    // Get last 6 tutor requests
+    app.get("/student-post-latest", async (req, res) => {
+      try {
+        const latestRequests = await studentPostCollection
           .find()
           .sort({ createdAt: -1 })
           .limit(6)
@@ -123,11 +126,11 @@ async function run() {
       }
     });
 
-    app.post("/tutor-request", async (req, res) => {
+    app.post("/student-post", async (req, res) => {
       try {
         const data = req.body;
         data.createdAt = new Date();
-        const result = await tutorRequestCollection.insertOne(data);
+        const result = await studentPostCollection.insertOne(data);
         res.send(result);
       } catch (error) {
         console.log(error);
@@ -154,7 +157,7 @@ async function run() {
 
         res.send(result);
       } catch (error) {
-        console.error("GET /tutor-request/:id Error:", error);
+        console.error("GET /student-post/:id Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to fetch the tutor request",
