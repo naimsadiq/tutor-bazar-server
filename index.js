@@ -34,6 +34,7 @@ async function run() {
     const studentPostCollection = db.collection("student-post");
     const teacherProfilesCollection = db.collection("teacher_profiles");
 
+    //create User
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.createdAt = new Date();
@@ -48,13 +49,44 @@ async function run() {
       res.send(result);
     });
 
+    //Get All Users
+    app.get("/users", async (req, res) => {
+      const users = await userCollection.find().toArray();
+      res.send(users);
+    });
+
+    // update a user's role
+    app.patch("/update-role", async (req, res) => {
+      const { email, role } = req.body;
+      const result = await userCollection.updateOne(
+        { email },
+        { $set: { role } }
+      );
+      // await sellerRequestsCollection.deleteOne({ email })
+
+      res.send(result);
+    });
+
     app.get("/student-post", async (req, res) => {
       try {
-        const email = req.query.email;
+        const { email, role } = req.query;
+        // role = "admin", "student", "public"
+
         let query = {};
 
-        if (email) {
+        // 1️⃣ Student → নিজের সব পোস্ট (status চেক করবে না)
+        if (role === "student" && email) {
           query.studentEmail = email;
+        }
+
+        // 2️⃣ Admin → সব পোস্ট দেখবে (কোনো ফিল্টার চাই না)
+        if (role === "admin") {
+          // admin এর জন্য query empty থাকবে
+        }
+
+        // 3️⃣ Homepage বা Public → শুধুমাত্র active পোস্ট
+        if (role === "public") {
+          query.status = "active";
         }
 
         const result = await studentPostCollection.find(query).toArray();
@@ -63,8 +95,54 @@ async function run() {
         console.error("GET /student-post Error:", error);
         res.status(500).send({
           error: true,
-          message: "Failed to fetch tutor requests",
+          message: "Failed to fetch student posts",
         });
+      }
+    });
+
+    // admin accept post
+    app.patch("/student-post/accept/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+
+        const updateDoc = {
+          $set: { status: "active" },
+        };
+
+        const result = await studentPostCollection.updateOne(filter, updateDoc);
+
+        res.send({
+          success: true,
+          message: "Post accepted successfully",
+          result,
+        });
+      } catch (error) {
+        console.error("Accept Error:", error);
+        res.status(500).send({ error: true, message: "Failed to accept post" });
+      }
+    });
+
+    // admin reject post
+    app.patch("/student-post/reject/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+
+        const updateDoc = {
+          $set: { status: "blocked" },
+        };
+
+        const result = await studentPostCollection.updateOne(filter, updateDoc);
+
+        res.send({
+          success: true,
+          message: "Post rejected successfully",
+          result,
+        });
+      } catch (error) {
+        console.error("Reject Error:", error);
+        res.status(500).send({ error: true, message: "Failed to reject post" });
       }
     });
 
