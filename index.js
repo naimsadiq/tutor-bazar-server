@@ -32,6 +32,7 @@ async function run() {
     const db = client.db("tutor_bazar_db");
     const userCollection = db.collection("users");
     const studentPostCollection = db.collection("student-post");
+    const appliedTutorsCollection = db.collection("applied-tutors");
     const teacherProfilesCollection = db.collection("teacher_profiles");
 
     //create User
@@ -190,6 +191,41 @@ async function run() {
       } catch (error) {
         console.log(error);
         res.status(500).send({ error: true, message: error.message });
+      }
+    });
+
+    //get student post
+    app.get("/applied-tutors", async (req, res) => {
+      const { email } = req.query; // email query param
+      const tutors = await appliedTutorsCollection
+        .find({ studentEmail: email }) // backend ফিল্ড name check করুন
+        .toArray();
+      res.send(tutors);
+    });
+
+    //student post apply
+    app.post("/apply-tutor", async (req, res) => {
+      try {
+        const application = req.body;
+
+        // duplicate check (এক টিউশন-এ একই টিউটর দ্বিতীয়বার apply করতে না পারে)
+        const exists = await appliedTutorsCollection.findOne({
+          tutorEmail: application.tutorEmail,
+          tuitionId: application.tuitionId,
+        });
+
+        if (exists) {
+          return res.status(400).send({ message: "Already applied!" });
+        }
+
+        application.status = "pending";
+        application.appliedAt = new Date();
+
+        const result = await appliedTutorsCollection.insertOne(application);
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Server error", error });
       }
     });
 
