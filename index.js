@@ -272,7 +272,7 @@ async function run() {
         const filter = { _id: new ObjectId(id) };
 
         const updateDoc = {
-          $set: { status: "active" },
+          $set: { status: "Approved" },
         };
 
         const result = await teacherProfilesCollection.updateOne(
@@ -298,7 +298,7 @@ async function run() {
         const filter = { _id: new ObjectId(id) };
 
         const updateDoc = {
-          $set: { status: "blocked" },
+          $set: { status: "Rejected" },
         };
 
         const result = await teacherProfilesCollection.updateOne(
@@ -364,6 +364,35 @@ async function run() {
       }
     });
 
+    //payment history
+    // 📌 Get Payment History
+    app.get("/payment-history", async (req, res) => {
+      try {
+        const email = req.query.email;
+
+        if (!email) {
+          return res.status(400).send({
+            error: true,
+            message: "Email is required",
+          });
+        }
+
+        const payments = await paymentsCollection
+          .find({ studentEmail: email })
+          .sort({ date: -1 }) // Latest first
+          .toArray();
+
+        res.send(payments);
+      } catch (error) {
+        console.error("Payment History Error:", error);
+        res.status(500).send({
+          error: true,
+          message: "Failed to load payment history",
+        });
+      }
+    });
+
+    //payment create
     app.post("/create-checkout-session", async (req, res) => {
       try {
         const paymentInfo = req.body;
@@ -392,6 +421,7 @@ async function run() {
 
           metadata: {
             tuitionId: String(paymentInfo.tuitionId),
+            tutorEmail: String(paymentInfo.tutorEmail),
             subject: String(paymentInfo.subject),
             classLevel: String(paymentInfo.classLevel),
           },
@@ -412,26 +442,24 @@ async function run() {
       try {
         const { sessionId } = req.body;
 
-        // Stripe session retrieve
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        // Metadata থেকে tuitionId আনতে পারো
         const tuitionId = session.metadata?.tuitionId;
+        const selectedTutorEmail = session.metadata?.tutorEmail;
+        const subject = session.metadata?.subject; // <--- FIXED
+        const classLevel = session.metadata?.classLevel; // <--- FIXED
 
-        if (!tuitionId) {
-          return res
-            .status(400)
-            .send({ error: true, message: "Invalid tuition ID" });
+        if (!tuitionId || !selectedTutorEmail) {
+          return res.status(400).send({ error: true, message: "Missing data" });
         }
 
-        // Payment successful কিনা check
         if (session.payment_status !== "paid") {
           return res
             .status(400)
             .send({ error: true, message: "Payment not completed" });
         }
 
-        // Check: Already saved?
+        // Check duplicate
         const existingOrder = await paymentsCollection.findOne({
           transactionId: session.payment_intent,
         });
@@ -443,39 +471,50 @@ async function run() {
           });
         }
 
-        // Save payment in DB
+        // Save payment
         const paymentInfo = {
           tuitionId,
+          subject,
+          classLevel,
           transactionId: session.payment_intent,
           studentEmail: session.customer_details.email,
           amount: session.amount_total / 100,
           paymentStatus: "paid",
           date: new Date(),
+          tutorEmail: selectedTutorEmail,
         };
 
         const result = await paymentsCollection.insertOne(paymentInfo);
 
-        // Tuition status update (accepted & paid)
-        await tuitionsCollection.updateOne(
+        // 1️⃣ Update student-post (Tuition)
+        await studentPostCollection.updateOne(
           { _id: new ObjectId(tuitionId) },
-          { $set: { status: "paid" } }
+          {
+            $set: {
+              status: "paid",
+              selectedTutor: selectedTutorEmail,
+              paidAt: new Date(),
+            },
+          }
         );
 
-        // (Optional) Tutor Assign update
-        // await tutorsCollection.updateOne({ email: selectedTutorEmail }, { $set: { assigned: true } });
+        // 2️⃣ Approve selected tutor
+        const approveResult = await appliedTutorsCollection.updateOne(
+          { tuitionId: tuitionId, tutorEmail: selectedTutorEmail },
+          { $set: { status: "approved", approvedAt: new Date() } }
+        );
 
         res.send({
           success: true,
-          message: "Payment recorded successfully",
+          message:
+            "Payment recorded, tuition updated, tutor approved & others rejected.",
           transactionId: session.payment_intent,
           paymentId: result.insertedId,
+          approved: approveResult.modifiedCount,
         });
       } catch (error) {
-        console.error("Payment success error:", error);
-        res.status(500).send({
-          error: true,
-          message: "Payment verification failed",
-        });
+        console.error("Payment Success Error:", error);
+        res.status(500).send({ error: true, message: error.message });
       }
     });
   } catch (err) {
