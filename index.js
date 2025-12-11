@@ -3,7 +3,7 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
@@ -34,6 +34,7 @@ async function run() {
     const studentPostCollection = db.collection("student-post");
     const appliedTutorsCollection = db.collection("applied-tutors");
     const teacherProfilesCollection = db.collection("teacher_profiles");
+    const paymentsCollection = db.collection("payments");
 
     //create User
     app.post("/users", async (req, res) => {
@@ -360,6 +361,121 @@ async function run() {
       } catch (error) {
         console.log(error);
         res.status(500).send({ error: true, message: error.message });
+      }
+    });
+
+    app.post("/create-checkout-session", async (req, res) => {
+      try {
+        const paymentInfo = req.body;
+
+        const amount = parseInt(paymentInfo.price) * 100;
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          mode: "payment",
+
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                unit_amount: amount,
+                product_data: {
+                  name: `${paymentInfo.subject} Tuition Fee`,
+                  images: paymentInfo.image ? [paymentInfo.image] : [],
+                },
+              },
+              quantity: 1,
+            },
+          ],
+
+          customer_email: paymentInfo.studentEmail,
+
+          metadata: {
+            tuitionId: String(paymentInfo.tuitionId),
+            subject: String(paymentInfo.subject),
+            classLevel: String(paymentInfo.classLevel),
+          },
+
+          success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.CLIENT_DOMAIN}/tuition/${paymentInfo.tuitionId}`,
+        });
+
+        res.send({ url: session.url });
+      } catch (error) {
+        console.error("Stripe Checkout Error:", error);
+        res.status(500).send({ error: true, message: error.message });
+      }
+    });
+
+    //payment succes
+    app.post("/payment-success", async (req, res) => {
+      try {
+        const { sessionId } = req.body;
+
+        // Stripe session retrieve
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        // Metadata থেকে tuitionId আনতে পারো
+        const tuitionId = session.metadata?.tuitionId;
+
+        if (!tuitionId) {
+          return res
+            .status(400)
+            .send({ error: true, message: "Invalid tuition ID" });
+        }
+
+        // Payment successful কিনা check
+        if (session.payment_status !== "paid") {
+          return res
+            .status(400)
+            .send({ error: true, message: "Payment not completed" });
+        }
+
+        // Check: Already saved?
+        const existingOrder = await paymentsCollection.findOne({
+          transactionId: session.payment_intent,
+        });
+
+        if (existingOrder) {
+          return res.send({
+            transactionId: session.payment_intent,
+            paymentId: existingOrder._id,
+          });
+        }
+
+        // Save payment in DB
+        const paymentInfo = {
+          tuitionId,
+          transactionId: session.payment_intent,
+          studentEmail: session.customer_details.email,
+          amount: session.amount_total / 100,
+          paymentStatus: "paid",
+          date: new Date(),
+        };
+
+        const result = await paymentsCollection.insertOne(paymentInfo);
+
+        // Tuition status update (accepted & paid)
+        await tuitionsCollection.updateOne(
+          { _id: new ObjectId(tuitionId) },
+          { $set: { status: "paid" } }
+        );
+
+        // (Optional) Tutor Assign update
+        // await tutorsCollection.updateOne({ email: selectedTutorEmail }, { $set: { assigned: true } });
+
+        res.send({
+          success: true,
+          message: "Payment recorded successfully",
+          transactionId: session.payment_intent,
+          paymentId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Payment success error:", error);
+        res.status(500).send({
+          error: true,
+          message: "Payment verification failed",
+        });
       }
     });
   } catch (err) {
