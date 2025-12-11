@@ -167,9 +167,9 @@ async function run() {
     app.get("/student-post-latest", async (req, res) => {
       try {
         const latestRequests = await studentPostCollection
-          .find()
-          .sort({ createdAt: -1 })
-          .limit(6)
+          .find({ status: "active" }) // শুধু active status
+          .sort({ createdAt: -1 }) // সর্বশেষ তৈরি হওয়া অনুযায়ী
+          .limit(6) // সর্বাধিক 6টি ডাটা
           .toArray();
 
         res.send(latestRequests);
@@ -193,13 +193,90 @@ async function run() {
       }
     });
 
+    // app.get("/teacher-profile", async (req, res) => {
+    //   try {
+    //     const result = await teacherProfilesCollection.find().toArray();
+    //     res.send(result);
+    //   } catch (error) {
+    //     console.log(error);
+    //     res.status(500).send({ error: true, message: error.message });
+    //   }
+    // });
+
     app.get("/teacher-profile", async (req, res) => {
       try {
-        const result = await teacherProfilesCollection.find().toArray();
+        const { email, role } = req.query;
+        const roleType = role || "public";
+
+        let query = {};
+
+        if (roleType === "teacher" && email) {
+          query.teacherEmail = email;
+        } else if (roleType === "public") {
+          query.status = "active";
+        }
+        // admin: query empty → সব দেখাবে
+
+        const result = await teacherProfilesCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
-        console.log(error);
-        res.status(500).send({ error: true, message: error.message });
+        console.error("GET /teacher-profile Error:", error);
+        res.status(500).send({
+          error: true,
+          message: "Failed to fetch teacher profiles",
+        });
+      }
+    });
+
+    // admin accept post
+    app.patch("/teacher-profile/accept/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+
+        const updateDoc = {
+          $set: { status: "active" },
+        };
+
+        const result = await teacherProfilesCollection.updateOne(
+          filter,
+          updateDoc
+        );
+
+        res.send({
+          success: true,
+          message: "Post accepted successfully",
+          result,
+        });
+      } catch (error) {
+        console.error("Accept Error:", error);
+        res.status(500).send({ error: true, message: "Failed to accept post" });
+      }
+    });
+
+    // admin reject post
+    app.patch("/teacher-profile/reject/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+
+        const updateDoc = {
+          $set: { status: "blocked" },
+        };
+
+        const result = await teacherProfilesCollection.updateOne(
+          filter,
+          updateDoc
+        );
+
+        res.send({
+          success: true,
+          message: "Post rejected successfully",
+          result,
+        });
+      } catch (error) {
+        console.error("Reject Error:", error);
+        res.status(500).send({ error: true, message: "Failed to reject post" });
       }
     });
 
@@ -224,15 +301,16 @@ async function run() {
     app.get("/teacher-profile-latest", async (req, res) => {
       try {
         const latestRequests = await teacherProfilesCollection
-          .find()
-          .sort({ createdAt: -1 })
-          .limit(6)
+          .find({ status: "active" }) // শুধু active status
+          .sort({ createdAt: -1 }) // সর্বশেষ তৈরি হওয়া অনুযায়ী
+          .limit(6) // সর্বাধিক 6টি ডাটা
           .toArray();
 
         res.send(latestRequests);
       } catch (error) {
+        console.error("GET /teacher-profile-latest Error:", error);
         res.status(500).send({
-          message: "Failed to fetch latest tutor requests",
+          message: "Failed to fetch latest active tutor requests",
           error: error.message,
         });
       }
