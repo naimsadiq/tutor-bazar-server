@@ -33,6 +33,7 @@ async function run() {
     const userCollection = db.collection("users");
     const studentPostCollection = db.collection("student-post");
     const appliedTutorsCollection = db.collection("applied-tutors");
+    const appliedStudentsCollection = db.collection("applied-students");
     const teacherProfilesCollection = db.collection("teacher_profiles");
     const paymentsCollection = db.collection("payments");
 
@@ -272,7 +273,7 @@ async function run() {
         const filter = { _id: new ObjectId(id) };
 
         const updateDoc = {
-          $set: { status: "Approved" },
+          $set: { status: "active" },
         };
 
         const result = await teacherProfilesCollection.updateOne(
@@ -298,7 +299,7 @@ async function run() {
         const filter = { _id: new ObjectId(id) };
 
         const updateDoc = {
-          $set: { status: "Rejected" },
+          $set: { status: "rejected" },
         };
 
         const result = await teacherProfilesCollection.updateOne(
@@ -331,6 +332,144 @@ async function run() {
           error: true,
           message: "Failed to fetch the tutor request",
         });
+      }
+    });
+
+    //get teacher accept student apply
+    app.patch("/apply-student/accept/:id", async (req, res) => {
+      try {
+        const appliedStudentId = req.params.id;
+
+        // 1️⃣ Update appliedStudentsCollection (student application)
+        const updateStudentResult = await appliedStudentsCollection.updateOne(
+          { _id: new ObjectId(appliedStudentId) },
+          { $set: { status: "approved" } }
+        );
+
+        // 2️⃣ Fetch the tutorId from applied student doc
+        const appliedStudentDoc = await appliedStudentsCollection.findOne({
+          _id: new ObjectId(appliedStudentId),
+        });
+
+        if (!appliedStudentDoc) {
+          return res.status(404).send({ message: "Applied student not found" });
+        }
+
+        const tutorId = appliedStudentDoc.tutorId;
+
+        // 3️⃣ Update teacherProfilesCollection (e.g., mark teacher status if needed)
+        const updateTeacherResult = await teacherProfilesCollection.updateOne(
+          { _id: new ObjectId(tutorId) },
+          { $set: { status: "approved" } } // optional, just example
+        );
+
+        res.send({
+          success: true,
+          message: "Application accepted successfully",
+          updateStudentResult,
+          updateTeacherResult,
+        });
+      } catch (error) {
+        console.error("Accept Error:", error);
+        res
+          .status(500)
+          .send({ error: true, message: "Failed to accept application" });
+      }
+    });
+
+    //get teacher reject student apply
+    app.patch("/apply-student/reject/:id", async (req, res) => {
+      try {
+        const appliedStudentId = req.params.id;
+
+        // 1️⃣ Update appliedStudentsCollection (student application)
+        const updateStudentResult = await appliedStudentsCollection.updateOne(
+          { _id: new ObjectId(appliedStudentId) },
+          { $set: { status: "rejected" } }
+        );
+
+        // 2️⃣ Fetch the tutorId from applied student doc
+        const appliedStudentDoc = await appliedStudentsCollection.findOne({
+          _id: new ObjectId(appliedStudentId),
+        });
+
+        if (!appliedStudentDoc) {
+          return res.status(404).send({ message: "Applied student not found" });
+        }
+
+        const tutorId = appliedStudentDoc.tutorId;
+
+        // 3️⃣ Update teacherProfilesCollection (e.g., mark teacher status if needed)
+        const updateTeacherResult = await teacherProfilesCollection.updateOne(
+          { _id: new ObjectId(tutorId) },
+          { $set: { status: "active" } } // optional, just example
+        );
+
+        res.send({
+          success: true,
+          message: "Application accepted successfully",
+          updateStudentResult,
+          updateTeacherResult,
+        });
+      } catch (error) {
+        console.error("Accept Error:", error);
+        res
+          .status(500)
+          .send({ error: true, message: "Failed to accept application" });
+      }
+    });
+
+    //get teacher profile apply
+    app.get("/apply-student", async (req, res) => {
+      const { tutorEmail, studentEmail } = req.query;
+
+      try {
+        let query = {};
+
+        if (tutorEmail) {
+          query.tutorEmail = tutorEmail;
+        } else if (studentEmail) {
+          query.studentEmail = studentEmail;
+        } else {
+          return res.status(400).send({
+            message: "Please provide tutorEmail or studentEmail in query",
+          });
+        }
+
+        const result = await appliedStudentsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Server error", error });
+      }
+    });
+
+    // Teacher Profile - Student Apply
+    app.post("/apply-student", async (req, res) => {
+      try {
+        const appliedStudentData = req.body; // studentEmail, tutorId, tutorName ইত্যাদি
+
+        // Duplicate check: একই tutor-এ একই student apply করতে পারবে না
+        const exists = await appliedStudentsCollection.findOne({
+          studentEmail: appliedStudentData.studentEmail,
+          tutorId: appliedStudentData.tutorId,
+        });
+
+        if (exists) {
+          return res.status(400).send({ message: "Already applied!" });
+        }
+
+        // Add default fields
+        appliedStudentData.status = "pending";
+        appliedStudentData.appliedAt = new Date();
+
+        // Save to DB
+        const result = await appliedStudentsCollection.insertOne(
+          appliedStudentData
+        );
+
+        res.send({ success: true, message: "Request sent!", data: result });
+      } catch (error) {
+        res.status(500).send({ message: "Server error", error });
       }
     });
 
