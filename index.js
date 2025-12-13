@@ -231,6 +231,24 @@ async function run() {
       }
     });
 
+    // check teacher profile exists
+    app.get("/teacher-profile-exists", async (req, res) => {
+      const { email } = req.query;
+      // console.log(email);
+
+      if (!email) {
+        return res.status(400).send({ exists: false });
+      }
+
+      const profile = await teacherProfilesCollection.findOne({
+        teacherEmail: email, // 🔥 IMPORTANT
+      });
+
+      // console.log(profile);
+
+      res.send({ exists: !!profile });
+    });
+
     // app.get("/teacher-profile", async (req, res) => {
     //   try {
     //     const result = await teacherProfilesCollection.find().toArray();
@@ -333,6 +351,31 @@ async function run() {
           message: "Failed to fetch the tutor request",
         });
       }
+    });
+
+    //teacher earning get
+    // teacher income details
+    app.get("/teacher-income-details", async (req, res) => {
+      const { email } = req.query;
+
+      if (!email) {
+        return res.send({ payments: [], totalIncome: 0 });
+      }
+
+      const payments = await paymentsCollection
+        .find({
+          tutorEmail: email,
+          paymentStatus: "paid",
+        })
+        .sort({ date: -1 }) // latest first
+        .toArray();
+
+      const totalIncome = payments.reduce((sum, item) => sum + item.amount, 0);
+
+      res.send({
+        payments,
+        totalIncome,
+      });
     });
 
     //get teacher accept student apply
@@ -535,7 +578,6 @@ async function run() {
     app.post("/create-checkout-session", async (req, res) => {
       try {
         const paymentInfo = req.body;
-
         const amount = parseInt(paymentInfo.price) * 100;
 
         const session = await stripe.checkout.sessions.create({
@@ -559,6 +601,8 @@ async function run() {
           customer_email: paymentInfo.studentEmail,
 
           metadata: {
+            paymentType: paymentInfo.paymentType,
+            applyId: String(paymentInfo.applyId),
             tuitionId: String(paymentInfo.tuitionId),
             tutorEmail: String(paymentInfo.tutorEmail),
             subject: String(paymentInfo.subject),
@@ -569,6 +613,7 @@ async function run() {
           cancel_url: `${process.env.CLIENT_DOMAIN}/tuition/${paymentInfo.tuitionId}`,
         });
 
+        console.log("Stripe session metadata:", session.metadata); // <-- এখন ঠিক জায়গায়
         res.send({ url: session.url });
       } catch (error) {
         console.error("Stripe Checkout Error:", error);
@@ -583,22 +628,9 @@ async function run() {
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        const tuitionId = session.metadata?.tuitionId;
-        const selectedTutorEmail = session.metadata?.tutorEmail;
-        const subject = session.metadata?.subject; // <--- FIXED
-        const classLevel = session.metadata?.classLevel; // <--- FIXED
+        const paymentType = session.metadata?.paymentType; //⭐ কোন পেমেন্ট ধরার জন্য
 
-        if (!tuitionId || !selectedTutorEmail) {
-          return res.status(400).send({ error: true, message: "Missing data" });
-        }
-
-        if (session.payment_status !== "paid") {
-          return res
-            .status(400)
-            .send({ error: true, message: "Payment not completed" });
-        }
-
-        // Check duplicate
+        // Duplicate check
         const existingOrder = await paymentsCollection.findOne({
           transactionId: session.payment_intent,
         });
@@ -610,47 +642,100 @@ async function run() {
           });
         }
 
-        // Save payment
-        const paymentInfo = {
-          tuitionId,
-          subject,
-          classLevel,
-          transactionId: session.payment_intent,
-          studentEmail: session.customer_details.email,
-          amount: session.amount_total / 100,
-          paymentStatus: "paid",
-          date: new Date(),
-          tutorEmail: selectedTutorEmail,
-        };
+        // --------------------------
+        // ⭐ 1️⃣ TUITION PAYMENT FLOW
+        // --------------------------
+        if (paymentType === "tuitionPayment") {
+          const tuitionId = session.metadata.tuitionId;
+          const selectedTutorEmail = session.metadata.tutorEmail;
 
-        const result = await paymentsCollection.insertOne(paymentInfo);
+          // Save Payment
+          const paymentInfo = {
+            paymentType,
+            tuitionId,
+            subject: session.metadata.subject,
+            classLevel: session.metadata.classLevel,
+            transactionId: session.payment_intent,
+            studentEmail: session.customer_details.email,
+            amount: session.amount_total / 100,
+            paymentStatus: "paid",
+            date: new Date(),
+            tutorEmail: selectedTutorEmail,
+          };
 
-        // 1️⃣ Update student-post (Tuition)
-        await studentPostCollection.updateOne(
-          { _id: new ObjectId(tuitionId) },
-          {
-            $set: {
-              status: "paid",
-              selectedTutor: selectedTutorEmail,
-              paidAt: new Date(),
-            },
-          }
-        );
+          const result = await paymentsCollection.insertOne(paymentInfo);
 
-        // 2️⃣ Approve selected tutor
-        const approveResult = await appliedTutorsCollection.updateOne(
-          { tuitionId: tuitionId, tutorEmail: selectedTutorEmail },
-          { $set: { status: "approved", approvedAt: new Date() } }
-        );
+          // Tuition Update
+          await studentPostCollection.updateOne(
+            { _id: new ObjectId(tuitionId) },
+            {
+              $set: {
+                status: "paid",
+                selectedTutor: selectedTutorEmail,
+                paidAt: new Date(),
+              },
+            }
+          );
 
-        res.send({
-          success: true,
-          message:
-            "Payment recorded, tuition updated, tutor approved & others rejected.",
-          transactionId: session.payment_intent,
-          paymentId: result.insertedId,
-          approved: approveResult.modifiedCount,
-        });
+          // Approve tutor
+          await appliedTutorsCollection.updateOne(
+            { tuitionId, tutorEmail: selectedTutorEmail },
+            { $set: { status: "approved", approvedAt: new Date() } }
+          );
+
+          return res.send({
+            success: true,
+            type: "tuitionPayment",
+            message: "Tuition payment processed successfully",
+            transactionId: session.payment_intent,
+            paymentId: result.insertedId,
+          });
+        }
+
+        // -------------------------------
+        // ⭐ 2️⃣ APPLIED-STUDENT PAYMENT FLOW
+        // -------------------------------
+        if (paymentType === "applyStudentPayment") {
+          const applyId = session.metadata.applyId;
+
+          // Payment save
+          const paymentInfo = {
+            paymentType,
+            applyId,
+            subject: session.metadata.subject,
+            classLevel: session.metadata.classLevel,
+            transactionId: session.payment_intent,
+            studentEmail: session.customer_details.email,
+            amount: session.amount_total / 100,
+            paymentStatus: "paid",
+            date: new Date(),
+            tutorEmail: session.metadata.tutorEmail,
+          };
+
+          const result = await paymentsCollection.insertOne(paymentInfo);
+
+          // 👇 applied-students Collection Update
+          const updateResult = await appliedStudentsCollection.updateOne(
+            { _id: new ObjectId(applyId) },
+            {
+              $set: {
+                status: "paid",
+                paidAt: new Date(),
+              },
+            }
+          );
+
+          return res.send({
+            success: true,
+            type: "applyStudentPayment",
+            message: "Applied student payment completed.",
+            transactionId: session.payment_intent,
+            paymentId: result.insertedId,
+            updated: updateResult.modifiedCount,
+          });
+        }
+
+        res.status(400).send({ error: true, message: "Invalid payment type" });
       } catch (error) {
         console.error("Payment Success Error:", error);
         res.status(500).send({ error: true, message: error.message });
