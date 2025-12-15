@@ -196,7 +196,6 @@ async function run() {
         } else if (role === "public") {
           query.status = "active";
         }
-        // admin → query empty → সব দেখাবে
 
         // Search
         if (search) {
@@ -295,9 +294,9 @@ async function run() {
     app.get("/student-post-latest", async (req, res) => {
       try {
         const latestRequests = await studentPostCollection
-          .find({ status: "active" }) // শুধু active status
-          .sort({ createdAt: -1 }) // সর্বশেষ তৈরি হওয়া অনুযায়ী
-          .limit(6) // সর্বাধিক 6টি ডাটা
+          .find({ status: "active" })
+          .sort({ createdAt: -1 })
+          .limit(6)
           .toArray();
 
         res.send(latestRequests);
@@ -323,9 +322,9 @@ async function run() {
 
     //get student post
     app.get("/applied-tutors", verifyFBToken, async (req, res) => {
-      const { email } = req.query; // email query param
+      const { email } = req.query;
       const tutors = await appliedTutorsCollection
-        .find({ studentEmail: email }) // backend ফিল্ড name check করুন
+        .find({ studentEmail: email })
         .toArray();
       res.send(tutors);
     });
@@ -335,7 +334,7 @@ async function run() {
       try {
         const application = req.body;
 
-        // duplicate check (এক টিউশন-এ একই টিউটর দ্বিতীয়বার apply করতে না পারে)
+        // duplicate check
         const exists = await appliedTutorsCollection.findOne({
           tutorEmail: application.tutorEmail,
           tuitionId: application.tuitionId,
@@ -366,7 +365,7 @@ async function run() {
       }
 
       const profile = await teacherProfilesCollection.findOne({
-        teacherEmail: email, // 🔥 IMPORTANT
+        teacherEmail: email,
       });
 
       // console.log(profile);
@@ -386,7 +385,7 @@ async function run() {
         } else if (roleType === "public") {
           query.status = "active";
         }
-        // admin: query empty → সব দেখাবে
+        // admin: query empty
 
         const result = await teacherProfilesCollection.find(query).toArray();
         res.send(result);
@@ -463,6 +462,8 @@ async function run() {
       }
     );
 
+    //update profile
+
     app.get("/teacher-profile/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
@@ -478,6 +479,18 @@ async function run() {
           message: "Failed to fetch the tutor request",
         });
       }
+    });
+
+    app.put("/teacher-profile/:id", async (req, res) => {
+      const id = req.params.id;
+      const updatedData = req.body;
+
+      const result = await teacherProfilesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updatedData }
+      );
+
+      res.send(result);
     });
 
     //teacher earning get
@@ -518,13 +531,11 @@ async function run() {
       try {
         const appliedStudentId = req.params.id;
 
-        // 1️⃣ Update appliedStudentsCollection (student application)
         const updateStudentResult = await appliedStudentsCollection.updateOne(
           { _id: new ObjectId(appliedStudentId) },
           { $set: { status: "approved" } }
         );
 
-        // 2️⃣ Fetch the tutorId from applied student doc
         const appliedStudentDoc = await appliedStudentsCollection.findOne({
           _id: new ObjectId(appliedStudentId),
         });
@@ -535,10 +546,9 @@ async function run() {
 
         const tutorId = appliedStudentDoc.tutorId;
 
-        // 3️⃣ Update teacherProfilesCollection (e.g., mark teacher status if needed)
         const updateTeacherResult = await teacherProfilesCollection.updateOne(
           { _id: new ObjectId(tutorId) },
-          { $set: { status: "approved" } } // optional, just example
+          { $set: { status: "approved" } }
         );
 
         res.send({
@@ -555,18 +565,15 @@ async function run() {
       }
     });
 
-    //get teacher reject student apply
     app.patch("/apply-student/reject/:id", verifyFBToken, async (req, res) => {
       try {
         const appliedStudentId = req.params.id;
 
-        // 1️⃣ Update appliedStudentsCollection (student application)
         const updateStudentResult = await appliedStudentsCollection.updateOne(
           { _id: new ObjectId(appliedStudentId) },
           { $set: { status: "rejected" } }
         );
 
-        // 2️⃣ Fetch the tutorId from applied student doc
         const appliedStudentDoc = await appliedStudentsCollection.findOne({
           _id: new ObjectId(appliedStudentId),
         });
@@ -577,10 +584,9 @@ async function run() {
 
         const tutorId = appliedStudentDoc.tutorId;
 
-        // 3️⃣ Update teacherProfilesCollection (e.g., mark teacher status if needed)
         const updateTeacherResult = await teacherProfilesCollection.updateOne(
           { _id: new ObjectId(tutorId) },
-          { $set: { status: "active" } } // optional, just example
+          { $set: { status: "active" } }
         );
 
         res.send({
@@ -624,9 +630,9 @@ async function run() {
     // Teacher Profile - Student Apply
     app.post("/apply-student", async (req, res) => {
       try {
-        const appliedStudentData = req.body; // studentEmail, tutorId, tutorName ইত্যাদি
+        const appliedStudentData = req.body;
 
-        // Duplicate check: একই tutor-এ একই student apply করতে পারবে না
+        // Duplicate check
         const exists = await appliedStudentsCollection.findOne({
           studentEmail: appliedStudentData.studentEmail,
           tutorId: appliedStudentData.tutorId,
@@ -655,9 +661,9 @@ async function run() {
     app.get("/teacher-profile-latest", async (req, res) => {
       try {
         const latestRequests = await teacherProfilesCollection
-          .find({ status: "active" }) // শুধু active status
-          .sort({ createdAt: -1 }) // সর্বশেষ তৈরি হওয়া অনুযায়ী
-          .limit(6) // সর্বাধিক 6টি ডাটা
+          .find({ status: "active" })
+          .sort({ createdAt: -1 })
+          .limit(6)
           .toArray();
 
         res.send(latestRequests);
@@ -682,7 +688,6 @@ async function run() {
     });
 
     //payment history
-    // 📌 Get Payment History
     app.get("/payment-history", verifyFBToken, async (req, res) => {
       try {
         const email = req.query.email;
@@ -696,7 +701,7 @@ async function run() {
 
         const payments = await paymentsCollection
           .find({ studentEmail: email })
-          .sort({ date: -1 }) // Latest first
+          .sort({ date: -1 })
           .toArray();
 
         res.send(payments);
@@ -763,7 +768,7 @@ async function run() {
 
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-        const paymentType = session.metadata?.paymentType; //⭐ কোন পেমেন্ট ধরার জন্য
+        const paymentType = session.metadata?.paymentType;
 
         // Duplicate check
         const existingOrder = await paymentsCollection.findOne({
@@ -777,9 +782,6 @@ async function run() {
           });
         }
 
-        // --------------------------
-        // ⭐ 1️⃣ TUITION PAYMENT FLOW
-        // --------------------------
         if (paymentType === "tuitionPayment") {
           const tuitionId = session.metadata.tuitionId;
           const selectedTutorEmail = session.metadata.tutorEmail;
@@ -827,9 +829,6 @@ async function run() {
           });
         }
 
-        // -------------------------------
-        // ⭐ 2️⃣ APPLIED-STUDENT PAYMENT FLOW
-        // -------------------------------
         if (paymentType === "applyStudentPayment") {
           const applyId = session.metadata.applyId;
 
@@ -881,8 +880,7 @@ async function run() {
   }
 }
 
-run().catch(console.dir); // <-- এখানে ঠিক আছে
-// default route
+run().catch(console.dir);
 app.get("/", (req, res) => {
   res.send("Hello World!");
 });
