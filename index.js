@@ -2,9 +2,19 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 require("dotenv").config();
+const admin = require("firebase-admin");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const stripe = require("stripe")(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
+const decoded = Buffer.from(
+  process.env.FIREBASE_SERVICE_KEY,
+  "base64"
+).toString("utf8");
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 app.use(express.json());
 
@@ -14,6 +24,24 @@ app.use(
     credentials: true,
   })
 );
+
+const verifyFBToken = async (req, res, next) => {
+  const token = req.headers.authorization;
+
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+
+  try {
+    const idToken = token.split(" ")[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log("decoded in the token", decoded);
+    req.decoded_email = decoded.email;
+    next();
+  } catch (err) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+};
 
 // MongoDB
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.e1tbnr7.mongodb.net/?appName=Cluster0`;
@@ -37,6 +65,31 @@ async function run() {
     const teacherProfilesCollection = db.collection("teacher_profiles");
     const paymentsCollection = db.collection("payments");
 
+    // middle admin before allowing admin activity
+    // must be used after verifyFBToken middleware
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
+    const verifyTeacher = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+
+      if (!user || user.role !== "teacher") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
+      next();
+    };
+
     //create User
     app.post("/users", async (req, res) => {
       const user = req.body;
@@ -52,6 +105,66 @@ async function run() {
       res.send(result);
     });
 
+    app.get("/users/:email/role", async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await userCollection.findOne(query);
+      res.send({ role: user?.role || "user" });
+    });
+
+    // Get single user by email
+    app.get("/user-profile", verifyFBToken, async (req, res) => {
+      try {
+        const { email } = req.query;
+
+        if (!email) {
+          return res.status(400).send({ message: "Email is required" });
+        }
+
+        // Find single user by email
+        const user = await userCollection.findOne({ email: email });
+
+        if (!user) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send(user);
+      } catch (error) {
+        console.error("Error fetching user:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // Update user
+    app.patch("/user-profile", verifyFBToken, async (req, res) => {
+      try {
+        const { email } = req.query;
+        const updatedData = req.body;
+
+        const result = await userCollection.updateOne(
+          { email },
+          { $set: updatedData }
+        );
+
+        if (result.modifiedCount > 0) {
+          res.send({
+            success: true,
+            message: "User updated successfully",
+            modifiedCount: result.modifiedCount,
+          });
+        } else {
+          res.status(400).send({
+            success: false,
+            message: "No changes made",
+            modifiedCount: 0,
+          });
+        }
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
     //Get All Users
     app.get("/users", async (req, res) => {
       const users = await userCollection.find().toArray();
@@ -59,7 +172,7 @@ async function run() {
     });
 
     // update a user's role
-    app.patch("/update-role", async (req, res) => {
+    app.patch("/update-role", verifyFBToken, verifyAdmin, async (req, res) => {
       const { email, role } = req.body;
       const result = await userCollection.updateOne(
         { email },
@@ -70,29 +183,42 @@ async function run() {
       res.send(result);
     });
 
+    // GET /student-post?role=public&search=math&sort=low
     app.get("/student-post", async (req, res) => {
       try {
-        const { email, role } = req.query;
-        // role = "admin", "student", "public"
+        const { email, role, search, sort } = req.query;
 
         let query = {};
 
-        // 1️⃣ Student → নিজের সব পোস্ট (status চেক করবে না)
+        // Role based query
         if (role === "student" && email) {
           query.studentEmail = email;
-        }
-
-        // 2️⃣ Admin → সব পোস্ট দেখবে (কোনো ফিল্টার চাই না)
-        if (role === "admin") {
-          // admin এর জন্য query empty থাকবে
-        }
-
-        // 3️⃣ Homepage বা Public → শুধুমাত্র active পোস্ট
-        if (role === "public") {
+        } else if (role === "public") {
           query.status = "active";
         }
+        // admin → query empty → সব দেখাবে
 
-        const result = await studentPostCollection.find(query).toArray();
+        // Search
+        if (search) {
+          query.$or = [
+            { subject: { $regex: search, $options: "i" } },
+            { classLevel: { $regex: search, $options: "i" } },
+          ];
+        }
+
+        console.log(query);
+
+        let cursor = studentPostCollection.find(query);
+
+        // Sort by budget
+        if (sort === "low") {
+          cursor = cursor.sort({ budget: 1 });
+        } else if (sort === "high") {
+          cursor = cursor.sort({ budget: -1 });
+        }
+
+        const result = await cursor.toArray();
+        console.log(cursor);
         res.send(result);
       } catch (error) {
         console.error("GET /student-post Error:", error);
@@ -103,8 +229,7 @@ async function run() {
       }
     });
 
-    // admin accept post
-    app.patch("/student-post/accept/:id", async (req, res) => {
+    app.patch("/student-post/accept/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
@@ -127,7 +252,7 @@ async function run() {
     });
 
     // admin reject post
-    app.patch("/student-post/reject/:id", async (req, res) => {
+    app.patch("/student-post/reject/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
@@ -197,7 +322,7 @@ async function run() {
     });
 
     //get student post
-    app.get("/applied-tutors", async (req, res) => {
+    app.get("/applied-tutors", verifyFBToken, async (req, res) => {
       const { email } = req.query; // email query param
       const tutors = await appliedTutorsCollection
         .find({ studentEmail: email }) // backend ফিল্ড name check করুন
@@ -249,16 +374,6 @@ async function run() {
       res.send({ exists: !!profile });
     });
 
-    // app.get("/teacher-profile", async (req, res) => {
-    //   try {
-    //     const result = await teacherProfilesCollection.find().toArray();
-    //     res.send(result);
-    //   } catch (error) {
-    //     console.log(error);
-    //     res.status(500).send({ error: true, message: error.message });
-    //   }
-    // });
-
     app.get("/teacher-profile", async (req, res) => {
       try {
         const { email, role } = req.query;
@@ -285,58 +400,70 @@ async function run() {
     });
 
     // admin accept post
-    app.patch("/teacher-profile/accept/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const filter = { _id: new ObjectId(id) };
+    app.patch(
+      "/teacher-profile/accept/:id",
+      verifyFBToken,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const filter = { _id: new ObjectId(id) };
 
-        const updateDoc = {
-          $set: { status: "active" },
-        };
+          const updateDoc = {
+            $set: { status: "active" },
+          };
 
-        const result = await teacherProfilesCollection.updateOne(
-          filter,
-          updateDoc
-        );
+          const result = await teacherProfilesCollection.updateOne(
+            filter,
+            updateDoc
+          );
 
-        res.send({
-          success: true,
-          message: "Post accepted successfully",
-          result,
-        });
-      } catch (error) {
-        console.error("Accept Error:", error);
-        res.status(500).send({ error: true, message: "Failed to accept post" });
+          res.send({
+            success: true,
+            message: "Post accepted successfully",
+            result,
+          });
+        } catch (error) {
+          console.error("Accept Error:", error);
+          res
+            .status(500)
+            .send({ error: true, message: "Failed to accept post" });
+        }
       }
-    });
+    );
 
     // admin reject post
-    app.patch("/teacher-profile/reject/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const filter = { _id: new ObjectId(id) };
+    app.patch(
+      "/teacher-profile/reject/:id",
+      verifyFBToken,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const filter = { _id: new ObjectId(id) };
 
-        const updateDoc = {
-          $set: { status: "rejected" },
-        };
+          const updateDoc = {
+            $set: { status: "rejected" },
+          };
 
-        const result = await teacherProfilesCollection.updateOne(
-          filter,
-          updateDoc
-        );
+          const result = await teacherProfilesCollection.updateOne(
+            filter,
+            updateDoc
+          );
 
-        res.send({
-          success: true,
-          message: "Post rejected successfully",
-          result,
-        });
-      } catch (error) {
-        console.error("Reject Error:", error);
-        res.status(500).send({ error: true, message: "Failed to reject post" });
+          res.send({
+            success: true,
+            message: "Post rejected successfully",
+            result,
+          });
+        } catch (error) {
+          console.error("Reject Error:", error);
+          res
+            .status(500)
+            .send({ error: true, message: "Failed to reject post" });
+        }
       }
-    });
+    );
 
-    app.get("/teacher-profile/:id", async (req, res) => {
+    app.get("/teacher-profile/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const result = await teacherProfilesCollection.findOne({
@@ -355,31 +482,39 @@ async function run() {
 
     //teacher earning get
     // teacher income details
-    app.get("/teacher-income-details", async (req, res) => {
-      const { email } = req.query;
+    app.get(
+      "/teacher-income-details",
+      verifyFBToken,
+      verifyTeacher,
+      async (req, res) => {
+        const { email } = req.query;
 
-      if (!email) {
-        return res.send({ payments: [], totalIncome: 0 });
+        if (!email) {
+          return res.send({ payments: [], totalIncome: 0 });
+        }
+
+        const payments = await paymentsCollection
+          .find({
+            tutorEmail: email,
+            paymentStatus: "paid",
+          })
+          .sort({ date: -1 }) // latest first
+          .toArray();
+
+        const totalIncome = payments.reduce(
+          (sum, item) => sum + item.amount,
+          0
+        );
+
+        res.send({
+          payments,
+          totalIncome,
+        });
       }
-
-      const payments = await paymentsCollection
-        .find({
-          tutorEmail: email,
-          paymentStatus: "paid",
-        })
-        .sort({ date: -1 }) // latest first
-        .toArray();
-
-      const totalIncome = payments.reduce((sum, item) => sum + item.amount, 0);
-
-      res.send({
-        payments,
-        totalIncome,
-      });
-    });
+    );
 
     //get teacher accept student apply
-    app.patch("/apply-student/accept/:id", async (req, res) => {
+    app.patch("/apply-student/accept/:id", verifyFBToken, async (req, res) => {
       try {
         const appliedStudentId = req.params.id;
 
@@ -421,7 +556,7 @@ async function run() {
     });
 
     //get teacher reject student apply
-    app.patch("/apply-student/reject/:id", async (req, res) => {
+    app.patch("/apply-student/reject/:id", verifyFBToken, async (req, res) => {
       try {
         const appliedStudentId = req.params.id;
 
@@ -463,7 +598,7 @@ async function run() {
     });
 
     //get teacher profile apply
-    app.get("/apply-student", async (req, res) => {
+    app.get("/apply-student", verifyFBToken, async (req, res) => {
       const { tutorEmail, studentEmail } = req.query;
 
       try {
@@ -535,7 +670,7 @@ async function run() {
       }
     });
 
-    app.post("/teacher-profile", async (req, res) => {
+    app.post("/teacher-profile", verifyFBToken, async (req, res) => {
       try {
         const teacherData = req.body;
         const result = await teacherProfilesCollection.insertOne(teacherData);
@@ -548,7 +683,7 @@ async function run() {
 
     //payment history
     // 📌 Get Payment History
-    app.get("/payment-history", async (req, res) => {
+    app.get("/payment-history", verifyFBToken, async (req, res) => {
       try {
         const email = req.query.email;
 
