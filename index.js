@@ -56,7 +56,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("tutor_bazar_db");
     const userCollection = db.collection("users");
     const studentPostCollection = db.collection("student-post");
