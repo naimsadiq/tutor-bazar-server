@@ -35,7 +35,7 @@ const verifyFBToken = async (req, res, next) => {
   try {
     const idToken = token.split(" ")[1];
     const decoded = await admin.auth().verifyIdToken(idToken);
-    console.log("decoded in the token", decoded);
+    // console.log("decoded in the token", decoded);
     req.decoded_email = decoded.email;
     next();
   } catch (err) {
@@ -130,7 +130,7 @@ async function run() {
 
         res.send(user);
       } catch (error) {
-        console.error("Error fetching user:", error);
+        // console.error("Error fetching user:", error);
         res.status(500).send({ message: "Internal server error" });
       }
     });
@@ -160,7 +160,7 @@ async function run() {
           });
         }
       } catch (error) {
-        console.error("Error updating user:", error);
+        // console.error("Error updating user:", error);
         res.status(500).send({ message: "Internal server error" });
       }
     });
@@ -205,7 +205,7 @@ async function run() {
           ];
         }
 
-        console.log(query);
+        // console.log(query);
 
         let cursor = studentPostCollection.find(query);
 
@@ -217,10 +217,10 @@ async function run() {
         }
 
         const result = await cursor.toArray();
-        console.log(cursor);
+        // console.log(cursor);
         res.send(result);
       } catch (error) {
-        console.error("GET /student-post Error:", error);
+        // console.error("GET /student-post Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to fetch student posts",
@@ -245,7 +245,7 @@ async function run() {
           result,
         });
       } catch (error) {
-        console.error("Accept Error:", error);
+        // console.error("Accept Error:", error);
         res.status(500).send({ error: true, message: "Failed to accept post" });
       }
     });
@@ -282,7 +282,7 @@ async function run() {
 
         res.send(result);
       } catch (error) {
-        console.error("GET /student-post/:id Error:", error);
+        // console.error("GET /student-post/:id Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to fetch the tutor request",
@@ -315,7 +315,7 @@ async function run() {
         const result = await studentPostCollection.insertOne(data);
         res.send(result);
       } catch (error) {
-        console.log(error);
+        // console.log(error);
         res.status(500).send({ error: true, message: error.message });
       }
     });
@@ -390,7 +390,7 @@ async function run() {
         const result = await teacherProfilesCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
-        console.error("GET /teacher-profile Error:", error);
+        // console.error("GET /teacher-profile Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to fetch teacher profiles",
@@ -422,7 +422,7 @@ async function run() {
             result,
           });
         } catch (error) {
-          console.error("Accept Error:", error);
+          // console.error("Accept Error:", error);
           res
             .status(500)
             .send({ error: true, message: "Failed to accept post" });
@@ -454,7 +454,7 @@ async function run() {
             result,
           });
         } catch (error) {
-          console.error("Reject Error:", error);
+          // console.error("Reject Error:", error);
           res
             .status(500)
             .send({ error: true, message: "Failed to reject post" });
@@ -473,7 +473,7 @@ async function run() {
 
         res.send(result);
       } catch (error) {
-        console.error("GET /student-post/:id Error:", error);
+        // console.error("GET /student-post/:id Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to fetch the tutor request",
@@ -558,7 +558,7 @@ async function run() {
           updateTeacherResult,
         });
       } catch (error) {
-        console.error("Accept Error:", error);
+        // console.error("Accept Error:", error);
         res
           .status(500)
           .send({ error: true, message: "Failed to accept application" });
@@ -596,7 +596,7 @@ async function run() {
           updateTeacherResult,
         });
       } catch (error) {
-        console.error("Accept Error:", error);
+        // console.error("Accept Error:", error);
         res
           .status(500)
           .send({ error: true, message: "Failed to accept application" });
@@ -668,7 +668,7 @@ async function run() {
 
         res.send(latestRequests);
       } catch (error) {
-        console.error("GET /teacher-profile-latest Error:", error);
+        // console.error("GET /teacher-profile-latest Error:", error);
         res.status(500).send({
           message: "Failed to fetch latest active tutor requests",
           error: error.message,
@@ -682,7 +682,7 @@ async function run() {
         const result = await teacherProfilesCollection.insertOne(teacherData);
         res.send(result);
       } catch (error) {
-        console.log(error);
+        // console.log(error);
         res.status(500).send({ error: true, message: error.message });
       }
     });
@@ -706,7 +706,7 @@ async function run() {
 
         res.send(payments);
       } catch (error) {
-        console.error("Payment History Error:", error);
+        // console.error("Payment History Error:", error);
         res.status(500).send({
           error: true,
           message: "Failed to load payment history",
@@ -753,10 +753,10 @@ async function run() {
           cancel_url: `${process.env.CLIENT_DOMAIN}/tuition/${paymentInfo.tuitionId}`,
         });
 
-        console.log("Stripe session metadata:", session.metadata); // <-- এখন ঠিক জায়গায়
+        // console.log("Stripe session metadata:", session.metadata);
         res.send({ url: session.url });
       } catch (error) {
-        console.error("Stripe Checkout Error:", error);
+        // console.error("Stripe Checkout Error:", error);
         res.status(500).send({ error: true, message: error.message });
       }
     });
@@ -876,13 +876,14 @@ async function run() {
       }
     });
   } catch (err) {
-    console.log(err);
+    // console.log(err);
   }
 }
 
 run().catch(console.dir);
 app.get("/", (req, res) => {
-  res.send("Hello World!");s
+  res.send("Hello World!");
+  s;
 });
 
 app.listen(port, () => {
